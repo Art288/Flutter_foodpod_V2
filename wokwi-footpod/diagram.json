@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "author": "FootPod IoT Telemetry System (BNO055 9-DOF)",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-uno",
+      "id": "uno",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-mpu6050",
+      "id": "imu",
+      "top": -120,
+      "left": 230,
+      "attrs": { "label": "BNO055 (IMU I2C)" }
+    },
+    {
+      "type": "board-ssd1306",
+      "id": "oled",
+      "top": -130,
+      "left": -60,
+      "attrs": { "i2cAddress": "0x3c" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn_sync",
+      "top": 160,
+      "left": 240,
+      "attrs": { "color": "orange", "label": "SYNC / RUN" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_status",
+      "top": 160,
+      "left": -40,
+      "attrs": { "color": "orange", "label": "Status LED" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 210,
+      "left": -40,
+      "attrs": { "value": "220" }
+    }
+  ],
+  "connections": [
+    [ "uno:GND.1", "oled:GND", "black", [ "v-20", "h-40" ] ],
+    [ "uno:5V", "oled:VCC", "red", [ "v-30", "h-50" ] ],
+    [ "uno:A5", "oled:SCL", "yellow", [ "v-40", "h-20" ] ],
+    [ "uno:A4", "oled:SDA", "green", [ "v-50", "h-10" ] ],
+
+    [ "uno:5V", "imu:VCC", "red", [ "v-60", "h150" ] ],
+    [ "uno:GND.2", "imu:GND", "black", [ "v-70", "h140" ] ],
+    [ "uno:A5", "imu:SCL", "yellow", [ "v-40", "h130" ] ],
+    [ "uno:A4", "imu:SDA", "green", [ "v-50", "h120" ] ],
+
+    [ "uno:2", "btn_sync:1.r", "orange", [ "v20", "h100" ] ],
+    [ "uno:GND.3", "btn_sync:2.r", "black", [ "v40", "h110" ] ],
+
+    [ "uno:13", "led_status:A", "orange", [ "v20", "h-30" ] ],
+    [ "led_status:C", "r1:1", "black", [ "v10" ] ],
+    [ "r1:2", "uno:GND.1", "black", [ "v20", "h40" ] ]
+  ]
+}

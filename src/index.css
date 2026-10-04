@@ -1,0 +1,89 @@
+@import 'leaflet/dist/leaflet.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Default Light & Dark base body styling */
+  html {
+    color-scheme: dark;
+  }
+  html.light {
+    color-scheme: light;
+  }
+
+  body {
+    @apply antialiased selection:bg-brand selection:text-white transition-colors duration-200;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Light mode root body */
+  html.light body {
+    background-color: #F3F4F6;
+    color: #0F172A;
+  }
+
+  /* Dark mode root body */
+  html.dark body {
+    background-color: #09090D;
+    color: #F8FAFC;
+  }
+
+  /* Custom modern dark/light scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #4B5563;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #ff6600;
+  }
+}
+
+/* Custom glow and utility classes */
+.glass-panel {
+  background: rgba(19, 19, 26, 0.8);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.light .glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.glass-panel-orange {
+  background: linear-gradient(135deg, rgba(255, 102, 0, 0.08) 0%, rgba(19, 19, 26, 0.85) 100%);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 102, 0, 0.25);
+}
+
+.orange-gradient-text {
+  background: linear-gradient(135deg, #FF9933 0%, #FF6600 50%, #FF3300 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.orange-btn-gradient {
+  background: linear-gradient(135deg, #FF7700 0%, #FF5500 100%);
+  transition: all 0.25s ease-in-out;
+}
+.orange-btn-gradient:hover {
+  background: linear-gradient(135deg, #FF8800 0%, #FF6600 100%);
+  box-shadow: 0 0 20px rgba(255, 102, 0, 0.45);
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s infinite ease-in-out;
+}
