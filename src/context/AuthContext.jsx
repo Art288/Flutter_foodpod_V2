@@ -39,6 +39,102 @@ const safeSetDoc = async (docRef, data, options = {}, timeoutMs = 3500) => {
   }
 };
 
+/**
+ * Retrieve previously saved health profile from persistent local storage
+ */
+export const getSavedHealthProfile = (userId, email) => {
+  try {
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    const profilesStr = localStorage.getItem('footpod_health_profiles');
+    const profiles = profilesStr ? JSON.parse(profilesStr) : {};
+
+    // 1. Direct match by userId
+    if (userId && profiles[userId]) {
+      return profiles[userId];
+    }
+    // 2. Direct match by email
+    if (cleanEmail && profiles[cleanEmail]) {
+      return profiles[cleanEmail];
+    }
+    // 3. Match in footpod_users array
+    const usersStr = localStorage.getItem('footpod_users');
+    if (usersStr) {
+      const usersList = JSON.parse(usersStr);
+      const found = usersList.find(u => 
+        (userId && u.id === userId) ||
+        (cleanEmail && u.email && u.email.toLowerCase().trim() === cleanEmail)
+      );
+      if (found && (found.hasEnteredHealthData || found.age || found.weightKg || found.heightCm)) {
+        return found;
+      }
+    }
+    // 4. Individual keys
+    if (userId) {
+      const ind = localStorage.getItem('footpod_health_profile_' + userId);
+      if (ind) return JSON.parse(ind);
+    }
+    if (cleanEmail) {
+      const ind = localStorage.getItem('footpod_health_profile_' + cleanEmail);
+      if (ind) return JSON.parse(ind);
+    }
+  } catch (e) {
+    console.warn('Error reading saved health profile:', e);
+  }
+  return null;
+};
+
+/**
+ * Save user health profile locally and permanently so it is never lost on logout
+ */
+export const saveHealthProfileLocally = (user) => {
+  if (!user) return;
+  try {
+    const profilesStr = localStorage.getItem('footpod_health_profiles');
+    const profiles = profilesStr ? JSON.parse(profilesStr) : {};
+    const cleanEmail = user.email ? user.email.toLowerCase().trim() : '';
+
+    const healthData = {
+      id: user.id,
+      name: user.name || '',
+      email: cleanEmail,
+      age: user.age !== undefined && user.age !== null ? user.age : '',
+      gender: user.gender || 'ชาย (Male)',
+      weightKg: user.weightKg !== undefined && user.weightKg !== null ? user.weightKg : '',
+      heightCm: user.heightCm !== undefined && user.heightCm !== null ? user.heightCm : '',
+      footSide: user.footSide || 'ขวา (Right Foot)',
+      hasEnteredHealthData: Boolean(user.age || user.weightKg || user.heightCm || user.hasEnteredHealthData),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (user.id) {
+      profiles[user.id] = healthData;
+      localStorage.setItem('footpod_health_profile_' + user.id, JSON.stringify(healthData));
+    }
+    if (cleanEmail) {
+      profiles[cleanEmail] = healthData;
+      localStorage.setItem('footpod_health_profile_' + cleanEmail, JSON.stringify(healthData));
+    }
+    localStorage.setItem('footpod_health_profiles', JSON.stringify(profiles));
+
+    // Also update footpod_users array
+    const usersStr = localStorage.getItem('footpod_users');
+    if (usersStr) {
+      try {
+        const list = JSON.parse(usersStr);
+        const idx = list.findIndex(u => (user.id && u.id === user.id) || (cleanEmail && u.email && u.email.toLowerCase().trim() === cleanEmail));
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], ...healthData };
+        } else {
+          list.push({ ...user, ...healthData });
+        }
+        localStorage.setItem('footpod_users', JSON.stringify(list));
+      } catch (e) {}
+    }
+  } catch (e) {
+    console.warn('Error saving health profile locally:', e);
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   // Load registered users from localStorage or initialize with default demo user
   const [users, setUsers] = useState(() => {
@@ -58,7 +154,12 @@ export const AuthProvider = ({ children }) => {
     const savedUser = localStorage.getItem('footpod_current_user');
     if (savedUser) {
       try {
-        return JSON.parse(savedUser);
+        const parsed = JSON.parse(savedUser);
+        const savedHealth = getSavedHealthProfile(parsed.id, parsed.email);
+        if (savedHealth) {
+          return { ...parsed, ...savedHealth };
+        }
+        return parsed;
       } catch (e) {
         console.error('Failed to parse current user:', e);
       }
@@ -73,25 +174,60 @@ export const AuthProvider = ({ children }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          // Sync profile from Firestore if document exists (with 3.5s timeout)
+          // Check Firestore profile
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userSnap = await safeGetDoc(userDocRef);
 
+          // Check persistent local health profile for this user
+          const savedLocalProfile = getSavedHealthProfile(firebaseUser.uid, firebaseUser.email);
+
           if (userSnap && typeof userSnap.exists === 'function' && userSnap.exists()) {
-            setCurrentUser({ id: firebaseUser.uid, ...userSnap.data() });
-          } else {
-            const fallbackUser = {
+            const firestoreData = userSnap.data();
+            const resolvedUser = {
               id: firebaseUser.uid,
-              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'นักวิ่ง',
+              ...firestoreData,
+              // If local has previously saved health data, keep it!
+              name: firestoreData.name || savedLocalProfile?.name || firebaseUser.displayName || 'นักวิ่ง',
+              age: (savedLocalProfile?.age !== undefined && savedLocalProfile?.age !== '') ? savedLocalProfile.age : (firestoreData.age ?? ''),
+              weightKg: (savedLocalProfile?.weightKg !== undefined && savedLocalProfile?.weightKg !== '') ? savedLocalProfile.weightKg : (firestoreData.weightKg ?? ''),
+              heightCm: (savedLocalProfile?.heightCm !== undefined && savedLocalProfile?.heightCm !== '') ? savedLocalProfile.heightCm : (firestoreData.heightCm ?? ''),
+              gender: savedLocalProfile?.gender || firestoreData.gender || 'ชาย (Male)',
+              footSide: savedLocalProfile?.footSide || firestoreData.footSide || 'ขวา (Right Foot)'
+            };
+            setCurrentUser(resolvedUser);
+            saveHealthProfileLocally(resolvedUser);
+          } else if (savedLocalProfile) {
+            // Returning user who previously saved health data on this device
+            const restoredUser = {
+              id: firebaseUser.uid,
+              name: savedLocalProfile.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'นักวิ่ง',
+              email: firebaseUser.email || savedLocalProfile.email || '',
+              avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(firebaseUser.email || 'user')}`,
+              age: savedLocalProfile.age ?? '',
+              gender: savedLocalProfile.gender || 'ชาย (Male)',
+              weightKg: savedLocalProfile.weightKg ?? '',
+              heightCm: savedLocalProfile.heightCm ?? '',
+              footSide: savedLocalProfile.footSide || 'ขวา (Right Foot)',
+              hasEnteredHealthData: true
+            };
+            setCurrentUser(restoredUser);
+            saveHealthProfileLocally(restoredUser);
+          } else {
+            // Brand-new user logging in (e.g. new Google user without previous data)
+            // Leave age, weight, height empty as requested!
+            const newUser = {
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || '',
               email: firebaseUser.email || '',
               avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(firebaseUser.email || 'user')}`,
               age: '',
               gender: 'ชาย (Male)',
               weightKg: '',
               heightCm: '',
-              footSide: 'ขวา (Right Foot)'
+              footSide: 'ขวา (Right Foot)',
+              hasEnteredHealthData: false
             };
-            setCurrentUser(fallbackUser);
+            setCurrentUser(newUser);
           }
         } catch (e) {
           console.log('Firestore fetch user notice:', e);
@@ -138,6 +274,7 @@ export const AuthProvider = ({ children }) => {
         weightKg: weightKg !== undefined && weightKg !== '' && weightKg !== null ? Number(weightKg) : '',
         heightCm: heightCm !== undefined && heightCm !== '' && heightCm !== null ? Number(heightCm) : '',
         footSide: footSide || 'ขวา (Right Foot)',
+        hasEnteredHealthData: Boolean(age || weightKg || heightCm),
         avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`,
         registeredAt: new Date().toISOString()
       };
@@ -145,6 +282,7 @@ export const AuthProvider = ({ children }) => {
       // 2. Save user profile into Firestore collection 'users'
       await safeSetDoc(doc(db, 'users', uid), newUser);
 
+      saveHealthProfileLocally(newUser);
       setUsers(prev => [...prev, newUser]);
       setCurrentUser(newUser);
 
@@ -189,9 +327,11 @@ export const AuthProvider = ({ children }) => {
         weightKg: weightKg !== undefined && weightKg !== '' && weightKg !== null ? Number(weightKg) : '',
         heightCm: heightCm !== undefined && heightCm !== '' && heightCm !== null ? Number(heightCm) : '',
         footSide: footSide || 'ขวา (Right Foot)',
+        hasEnteredHealthData: Boolean(age || weightKg || heightCm),
         avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`,
         registeredAt: new Date().toISOString()
       };
+      saveHealthProfileLocally(fallbackUser);
       setUsers(prev => [...prev, fallbackUser]);
       setCurrentUser(fallbackUser);
 
@@ -227,21 +367,51 @@ export const AuthProvider = ({ children }) => {
         }
       } catch (e) {}
 
+      const savedLocalProfile = getSavedHealthProfile(uid, email);
+
       if (!userProfile) {
-        userProfile = {
-          id: uid,
-          name: userCredential.user.displayName || email.split('@')[0],
-          email: email.trim(),
-          avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
-          age: '',
-          gender: 'ชาย (Male)',
-          weightKg: '',
-          heightCm: '',
-          footSide: 'ขวา (Right Foot)'
-        };
+        if (savedLocalProfile) {
+          userProfile = {
+            id: uid,
+            name: savedLocalProfile.name || userCredential.user.displayName || email.split('@')[0],
+            email: email.trim(),
+            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
+            age: savedLocalProfile.age ?? '',
+            gender: savedLocalProfile.gender || 'ชาย (Male)',
+            weightKg: savedLocalProfile.weightKg ?? '',
+            heightCm: savedLocalProfile.heightCm ?? '',
+            footSide: savedLocalProfile.footSide || 'ขวา (Right Foot)',
+            hasEnteredHealthData: true
+          };
+        } else {
+          userProfile = {
+            id: uid,
+            name: userCredential.user.displayName || email.split('@')[0],
+            email: email.trim(),
+            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
+            age: '',
+            gender: 'ชาย (Male)',
+            weightKg: '',
+            heightCm: '',
+            footSide: 'ขวา (Right Foot)',
+            hasEnteredHealthData: false
+          };
+        }
         await safeSetDoc(doc(db, 'users', uid), userProfile, { merge: true });
+      } else if (savedLocalProfile) {
+        // Restore local values if previously entered
+        userProfile = {
+          ...userProfile,
+          name: userProfile.name || savedLocalProfile.name,
+          age: (savedLocalProfile.age !== undefined && savedLocalProfile.age !== '') ? savedLocalProfile.age : (userProfile.age ?? ''),
+          weightKg: (savedLocalProfile.weightKg !== undefined && savedLocalProfile.weightKg !== '') ? savedLocalProfile.weightKg : (userProfile.weightKg ?? ''),
+          heightCm: (savedLocalProfile.heightCm !== undefined && savedLocalProfile.heightCm !== '') ? savedLocalProfile.heightCm : (userProfile.heightCm ?? ''),
+          gender: savedLocalProfile.gender || userProfile.gender || 'ชาย (Male)',
+          footSide: savedLocalProfile.footSide || userProfile.footSide || 'ขวา (Right Foot)'
+        };
       }
 
+      saveHealthProfileLocally(userProfile);
       setCurrentUser(userProfile);
 
       return {
@@ -258,11 +428,14 @@ export const AuthProvider = ({ children }) => {
         u => u.email?.toLowerCase().trim() === trimmedEmail && u.password === password
       );
       if (localMatched) {
-        setCurrentUser(localMatched);
+        const savedHealth = getSavedHealthProfile(localMatched.id, localMatched.email);
+        const resolvedUser = savedHealth ? { ...localMatched, ...savedHealth } : localMatched;
+        saveHealthProfileLocally(resolvedUser);
+        setCurrentUser(resolvedUser);
         return {
           success: true,
-          message: `เข้าสู่ระบบสำเร็จ (บัญชีทดลอง/สาธิต) ยินดีต้อนรับคุณ ${localMatched.name}`,
-          user: localMatched
+          message: `เข้าสู่ระบบสำเร็จ ยินดีต้อนรับคุณ ${resolvedUser.name}`,
+          user: resolvedUser
         };
       }
 
@@ -293,6 +466,8 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Google Sign-In with Firebase Popup & Safe Timeout
+   * - Preserves previously saved health data for returning users
+   * - Leaves health data fields EMPTY for brand-new Google users
    */
   const loginWithGoogle = async () => {
     try {
@@ -301,7 +476,7 @@ export const AuthProvider = ({ children }) => {
 
       let googleUser = null;
 
-      // Try fetching existing profile from Firestore (with timeout)
+      // 1. Try fetching existing profile from Firestore (with timeout)
       try {
         const userDoc = await safeGetDoc(doc(db, 'users', user.uid));
         if (userDoc && typeof userDoc.exists === 'function' && userDoc.exists()) {
@@ -309,10 +484,46 @@ export const AuthProvider = ({ children }) => {
         }
       } catch (e) {}
 
-      if (!googleUser) {
+      // 2. Check if this device has previously saved health data for this Google user
+      const savedLocalProfile = getSavedHealthProfile(user.uid, user.email);
+
+      if (googleUser && (googleUser.age || googleUser.weightKg || googleUser.heightCm || googleUser.hasEnteredHealthData)) {
+        // Returning user with data in Firestore
+        if (savedLocalProfile) {
+          googleUser = {
+            ...googleUser,
+            name: googleUser.name || savedLocalProfile.name || user.displayName || '',
+            age: (googleUser.age !== undefined && googleUser.age !== '') ? googleUser.age : (savedLocalProfile.age ?? ''),
+            weightKg: (googleUser.weightKg !== undefined && googleUser.weightKg !== '') ? googleUser.weightKg : (savedLocalProfile.weightKg ?? ''),
+            heightCm: (googleUser.heightCm !== undefined && googleUser.heightCm !== '') ? googleUser.heightCm : (savedLocalProfile.heightCm ?? ''),
+            gender: googleUser.gender || savedLocalProfile.gender || 'ชาย (Male)',
+            footSide: googleUser.footSide || savedLocalProfile.footSide || 'ขวา (Right Foot)',
+            hasEnteredHealthData: true
+          };
+        }
+      } else if (savedLocalProfile && (savedLocalProfile.age || savedLocalProfile.weightKg || savedLocalProfile.heightCm || savedLocalProfile.hasEnteredHealthData)) {
+        // Returning user whose health data was saved locally on this device
         googleUser = {
           id: user.uid,
-          name: user.displayName || 'Google Runner',
+          name: savedLocalProfile.name || user.displayName || user.email?.split('@')[0] || '',
+          email: user.email || '',
+          avatar: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.email || 'user')}`,
+          age: savedLocalProfile.age ?? '',
+          gender: savedLocalProfile.gender || 'ชาย (Male)',
+          weightKg: savedLocalProfile.weightKg ?? '',
+          heightCm: savedLocalProfile.heightCm ?? '',
+          footSide: savedLocalProfile.footSide || 'ขวา (Right Foot)',
+          isGoogleAuth: true,
+          hasEnteredHealthData: true,
+          registeredAt: new Date().toISOString()
+        };
+        await safeSetDoc(doc(db, 'users', user.uid), googleUser, { merge: true });
+      } else {
+        // BRAND NEW GOOGLE USER (never logged in / never saved health data before)
+        // As requested: Leave fields EMPTY as default!
+        googleUser = {
+          id: user.uid,
+          name: user.displayName || '',
           email: user.email || '',
           avatar: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.email || 'user')}`,
           age: '',
@@ -321,13 +532,24 @@ export const AuthProvider = ({ children }) => {
           heightCm: '',
           footSide: 'ขวา (Right Foot)',
           isGoogleAuth: true,
+          hasEnteredHealthData: false,
           registeredAt: new Date().toISOString()
         };
-
         await safeSetDoc(doc(db, 'users', user.uid), googleUser, { merge: true });
       }
 
+      saveHealthProfileLocally(googleUser);
       setCurrentUser(googleUser);
+
+      setUsers(prev => {
+        const idx = prev.findIndex(u => u.id === googleUser.id || (u.email && u.email.toLowerCase() === googleUser.email?.toLowerCase()));
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], ...googleUser };
+          return updated;
+        }
+        return [...prev, googleUser];
+      });
 
       return {
         success: true,
@@ -405,12 +627,18 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Logout (แจ้งเตือนบอร์ด ESP32 ให้หยุดนับค่าและเข้าสู่โหมด Standby)
+   * บันทึกข้อมูลสุขภาพที่ผู้ใช้กรอกไว้ล่าสุดลง local storage ก่อนเคลียร์ session
    */
   const logout = async () => {
     try {
       await bleService.notifyLogout();
     } catch (e) {
       console.warn('BLE notifyLogout error:', e);
+    }
+
+    // Always preserve health data that was entered before logging out
+    if (currentUser) {
+      saveHealthProfileLocally(currentUser);
     }
 
     try {
@@ -421,22 +649,37 @@ export const AuthProvider = ({ children }) => {
   };
 
   /**
-   * Update Profile in Firestore + LocalState
+   * Update Profile in Firestore + LocalState + Persistent Local Storage
    */
   const updateProfile = async (updatedData) => {
     if (!currentUser) return;
-    const updated = { ...currentUser, ...updatedData };
+    const updated = { 
+      ...currentUser, 
+      ...updatedData, 
+      hasEnteredHealthData: true 
+    };
     setCurrentUser(updated);
+
+    // Save locally and persistently
+    saveHealthProfileLocally(updated);
 
     if (currentUser.id) {
       try {
-        await updateDoc(doc(db, 'users', currentUser.id), updatedData);
+        await updateDoc(doc(db, 'users', currentUser.id), { ...updatedData, hasEnteredHealthData: true });
       } catch (e) {
         await safeSetDoc(doc(db, 'users', currentUser.id), updated, { merge: true });
       }
     }
 
-    setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+    setUsers(prev => {
+      const idx = prev.findIndex(u => u.id === updated.id || (u.email && u.email.toLowerCase() === updated.email?.toLowerCase()));
+      if (idx >= 0) {
+        const list = [...prev];
+        list[idx] = updated;
+        return list;
+      }
+      return [...prev, updated];
+    });
   };
 
   return (

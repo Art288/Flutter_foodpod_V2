@@ -85,38 +85,74 @@ export const SettingsView = ({
   const [connectingDeviceId, setConnectingDeviceId] = useState(null);
   const [connectNotice, setConnectNotice] = useState('');
 
-  const [formData, setFormData] = useState({
-    name: currentUser?.name || '',
-    email: currentUser?.email || '',
-    age: currentUser?.age !== undefined && currentUser?.age !== null ? currentUser.age : '',
-    gender: currentUser?.gender || 'ชาย (Male)',
-    weightKg: currentUser?.weightKg !== undefined && currentUser?.weightKg !== null ? currentUser.weightKg : '',
-    heightCm: currentUser?.heightCm !== undefined && currentUser?.heightCm !== null ? currentUser.heightCm : '',
-    footSide: currentUser?.footSide || 'ขวา (Right Foot)'
+  const [formData, setFormData] = useState(() => {
+    const userKey = currentUser?.id || currentUser?.email || 'user';
+    const draft = localStorage.getItem('footpod_health_draft_' + userKey);
+    let draftData = null;
+    if (draft) {
+      try { draftData = JSON.parse(draft); } catch (e) {}
+    }
+
+    return {
+      name: draftData?.name || currentUser?.name || '',
+      email: currentUser?.email || '',
+      age: (draftData?.age !== undefined && draftData?.age !== '') 
+        ? draftData.age 
+        : (currentUser?.age !== undefined && currentUser?.age !== null ? currentUser.age : ''),
+      gender: draftData?.gender || currentUser?.gender || 'ชาย (Male)',
+      weightKg: (draftData?.weightKg !== undefined && draftData?.weightKg !== '') 
+        ? draftData.weightKg 
+        : (currentUser?.weightKg !== undefined && currentUser?.weightKg !== null ? currentUser.weightKg : ''),
+      heightCm: (draftData?.heightCm !== undefined && draftData?.heightCm !== '') 
+        ? draftData.heightCm 
+        : (currentUser?.heightCm !== undefined && currentUser?.heightCm !== null ? currentUser.heightCm : ''),
+      footSide: draftData?.footSide || currentUser?.footSide || 'ขวา (Right Foot)'
+    };
   });
 
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   useEffect(() => {
     if (currentUser) {
+      const userKey = currentUser.id || currentUser.email || 'user';
+      const draft = localStorage.getItem('footpod_health_draft_' + userKey);
+      let draftData = null;
+      if (draft) {
+        try { draftData = JSON.parse(draft); } catch (e) {}
+      }
+
       setFormData({
-        name: currentUser.name || '',
+        name: draftData?.name || currentUser.name || '',
         email: currentUser.email || '',
-        age: currentUser.age !== undefined && currentUser.age !== null ? currentUser.age : '',
-        gender: currentUser.gender || 'ชาย (Male)',
-        weightKg: currentUser.weightKg !== undefined && currentUser.weightKg !== null ? currentUser.weightKg : '',
-        heightCm: currentUser.heightCm !== undefined && currentUser.heightCm !== null ? currentUser.heightCm : '',
-        footSide: currentUser.footSide || 'ขวา (Right Foot)'
+        age: (draftData?.age !== undefined && draftData?.age !== '') 
+          ? draftData.age 
+          : (currentUser.age !== undefined && currentUser.age !== null ? currentUser.age : ''),
+        gender: draftData?.gender || currentUser.gender || 'ชาย (Male)',
+        weightKg: (draftData?.weightKg !== undefined && draftData?.weightKg !== '') 
+          ? draftData.weightKg 
+          : (currentUser.weightKg !== undefined && currentUser.weightKg !== null ? currentUser.weightKg : ''),
+        heightCm: (draftData?.heightCm !== undefined && draftData?.heightCm !== '') 
+          ? draftData.heightCm 
+          : (currentUser.heightCm !== undefined && currentUser.heightCm !== null ? currentUser.heightCm : ''),
+        footSide: draftData?.footSide || currentUser.footSide || 'ขวา (Right Foot)'
       });
     }
   }, [currentUser]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [name]: value
+      };
+      // Keep auto-saved draft for the active user session
+      if (currentUser) {
+        const userKey = currentUser.id || currentUser.email || 'user';
+        localStorage.setItem('footpod_health_draft_' + userKey, JSON.stringify(updated));
+      }
+      return updated;
+    });
   };
 
   const handleSave = (e) => {
@@ -130,10 +166,15 @@ export const SettingsView = ({
       footSide: formData.footSide
     });
 
+    if (currentUser) {
+      const userKey = currentUser.id || currentUser.email || 'user';
+      localStorage.removeItem('footpod_health_draft_' + userKey);
+    }
+
     setSavedSuccess(true);
     setTimeout(() => {
       setSavedSuccess(false);
-    }, 3000);
+    }, 4000);
   };
 
   const handleConnect = (device) => {
@@ -518,6 +559,13 @@ export const SettingsView = ({
             </div>
 
           </div>
+
+          {savedSuccess && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs sm:text-sm flex items-center gap-2 animate-fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span>บันทึกข้อมูลสุขภาพสำเร็จ! ระบบจะจดจำค่าที่คุณกรอกไว้ตลอดแม้จะออกจากระบบ</span>
+            </div>
+          )}
 
           <div className="flex justify-end pt-1">
             <button

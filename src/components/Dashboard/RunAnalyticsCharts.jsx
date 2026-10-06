@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -10,10 +10,21 @@ import {
   Legend,
   Filler
 } from 'chart.js';
+import zoomPlugin from 'chartjs-plugin-zoom';
 import { Line } from 'react-chartjs-2';
-import { TrendingUp, Activity, Zap, ShieldAlert } from 'lucide-react';
+import { 
+  TrendingUp, 
+  Activity, 
+  ShieldAlert, 
+  ZoomIn, 
+  ZoomOut, 
+  RotateCcw, 
+  ChevronLeft, 
+  ChevronRight,
+  MoveHorizontal
+} from 'lucide-react';
 
-// Register ChartJS modules
+// Register ChartJS modules including zoom plugin
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -22,11 +33,50 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
+  zoomPlugin
 );
 
 export const RunAnalyticsCharts = ({ telemetry = [] }) => {
   const [activeTab, setActiveTab] = useState('angle'); // 'angle' | 'impact'
+  const chartRef = useRef(null);
+  const [isZoomed, setIsZoomed] = useState(false);
+
+  // Zoom and Pan Handlers
+  const handleZoomIn = () => {
+    if (chartRef.current) {
+      chartRef.current.zoom(1.3);
+      setIsZoomed(true);
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (chartRef.current) {
+      chartRef.current.zoom(0.77);
+      setIsZoomed(true);
+    }
+  };
+
+  const handlePanLeft = () => {
+    if (chartRef.current) {
+      chartRef.current.pan({ x: 60 }, undefined, 'default');
+      setIsZoomed(true);
+    }
+  };
+
+  const handlePanRight = () => {
+    if (chartRef.current) {
+      chartRef.current.pan({ x: -60 }, undefined, 'default');
+      setIsZoomed(true);
+    }
+  };
+
+  const handleResetZoom = () => {
+    if (chartRef.current) {
+      chartRef.current.resetZoom();
+      setIsZoomed(false);
+    }
+  };
 
   if (!telemetry || telemetry.length === 0) {
     return (
@@ -48,6 +98,27 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
   const angleData = telemetry.map(t => t.footAngle);
   const impactData = telemetry.map(t => t.accelerationZ || t.impactG || 1.2);
   const cadenceData = telemetry.map(t => t.cadence);
+
+  // Common Zoom Options Configuration
+  const commonZoomPluginConfig = {
+    pan: {
+      enabled: true,
+      mode: 'x',
+      modifierKey: null,
+      onPanComplete: () => setIsZoomed(true)
+    },
+    zoom: {
+      wheel: {
+        enabled: true,
+        speed: 0.1
+      },
+      pinch: {
+        enabled: true
+      },
+      mode: 'x',
+      onZoomComplete: () => setIsZoomed(true)
+    }
+  };
 
   // 1. Foot Flexion Angle Chart Configuration
   const angleChartData = {
@@ -98,7 +169,8 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
             return `องศา: ${val}° — ${status}`;
           }
         }
-      }
+      },
+      zoom: commonZoomPluginConfig
     },
     scales: {
       x: {
@@ -107,7 +179,10 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         },
         ticks: {
           color: '#8E8EA0',
-          font: { size: 11 }
+          font: { size: 11 },
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 12
         }
       },
       y: {
@@ -171,12 +246,19 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         borderColor: '#2D2D3E',
         borderWidth: 1,
         padding: 10
-      }
+      },
+      zoom: commonZoomPluginConfig
     },
     scales: {
       x: {
         grid: { color: 'rgba(255, 255, 255, 0.04)' },
-        ticks: { color: '#8E8EA0', font: { size: 11 } }
+        ticks: { 
+          color: '#8E8EA0', 
+          font: { size: 11 },
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 12
+        }
       },
       y: {
         type: 'linear',
@@ -208,14 +290,14 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
   };
 
   return (
-    <div className="bg-white dark:bg-[#13131C] border border-slate-200 dark:border-[#232332] rounded-2xl p-5 sm:p-6 shadow-sm dark:shadow-card-dark transition-colors">
+    <div className="bg-white dark:bg-[#13131C] border border-slate-200 dark:border-[#232332] rounded-2xl p-5 sm:p-6 shadow-sm dark:shadow-card-dark transition-colors space-y-4">
       
-      {/* Chart Tab Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+      {/* Chart Header & Controls */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-brand" />
-            กราฟวิเคราะห์ข้อมูลเชิงลึกตลอดช่วงเวลาการวิ่ง (Time-Series Telemetry)
+            <span>กราฟวิเคราะห์ข้อมูลเชิงลึกตลอดช่วงเวลาการวิ่ง (Time-Series Telemetry)</span>
           </h3>
           <p className="text-xs text-slate-500 dark:text-dark-muted mt-0.5">
             ข้อมูลตรวจจับแรงกระแทกจาก ESP32-C3 และการเคลื่อนไหวแบบ Real-time
@@ -223,9 +305,12 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         </div>
 
         {/* Tab switcher */}
-        <div className="flex items-center p-1 bg-slate-100 dark:bg-[#0E0E14] border border-slate-200 dark:border-[#232332] rounded-xl self-start sm:self-auto">
+        <div className="flex items-center p-1 bg-slate-100 dark:bg-[#0E0E14] border border-slate-200 dark:border-[#232332] rounded-xl self-start lg:self-auto">
           <button
-            onClick={() => setActiveTab('angle')}
+            onClick={() => {
+              setActiveTab('angle');
+              handleResetZoom();
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               activeTab === 'angle'
                 ? 'bg-brand text-white shadow-orange-glow'
@@ -237,7 +322,10 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
           </button>
 
           <button
-            onClick={() => setActiveTab('impact')}
+            onClick={() => {
+              setActiveTab('impact');
+              handleResetZoom();
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               activeTab === 'impact'
                 ? 'bg-purple-600 text-white shadow-md'
@@ -250,25 +338,94 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         </div>
       </div>
 
+      {/* Interactive Zoom & Pan Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#161622] border border-slate-200 dark:border-[#262638]">
+        <div className="flex items-center gap-1 sm:gap-1.5">
+          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1 mr-1">
+            <MoveHorizontal className="w-3.5 h-3.5 text-brand" />
+            <span>ซูม & เลื่อน:</span>
+          </span>
+
+          {/* Zoom In */}
+          <button
+            onClick={handleZoomIn}
+            className="p-1.5 sm:px-2.5 sm:py-1 rounded-lg bg-white dark:bg-[#20202F] border border-slate-200 dark:border-[#2E2E42] text-slate-700 dark:text-slate-200 hover:text-brand hover:border-brand/50 text-xs font-semibold transition-all flex items-center gap-1 shadow-xs"
+            title="ซูมเข้า (Zoom In)"
+          >
+            <ZoomIn className="w-3.5 h-3.5 text-brand" />
+            <span className="hidden sm:inline">ซูมเข้า</span>
+          </button>
+
+          {/* Zoom Out */}
+          <button
+            onClick={handleZoomOut}
+            className="p-1.5 sm:px-2.5 sm:py-1 rounded-lg bg-white dark:bg-[#20202F] border border-slate-200 dark:border-[#2E2E42] text-slate-700 dark:text-slate-200 hover:text-brand hover:border-brand/50 text-xs font-semibold transition-all flex items-center gap-1 shadow-xs"
+            title="ซูมออก (Zoom Out)"
+          >
+            <ZoomOut className="w-3.5 h-3.5 text-brand" />
+            <span className="hidden sm:inline">ซูมออก</span>
+          </button>
+
+          {/* Pan Left */}
+          <button
+            onClick={handlePanLeft}
+            className="p-1.5 sm:px-2 sm:py-1 rounded-lg bg-white dark:bg-[#20202F] border border-slate-200 dark:border-[#2E2E42] text-slate-700 dark:text-slate-200 hover:text-brand hover:border-brand/50 text-xs font-semibold transition-all flex items-center gap-1 shadow-xs"
+            title="เลื่อนดูกราฟไปทางซ้าย (Pan Left)"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">เลื่อนซ้าย</span>
+          </button>
+
+          {/* Pan Right */}
+          <button
+            onClick={handlePanRight}
+            className="p-1.5 sm:px-2 sm:py-1 rounded-lg bg-white dark:bg-[#20202F] border border-slate-200 dark:border-[#2E2E42] text-slate-700 dark:text-slate-200 hover:text-brand hover:border-brand/50 text-xs font-semibold transition-all flex items-center gap-1 shadow-xs"
+            title="เลื่อนดูกราฟไปทางขวา (Pan Right)"
+          >
+            <span className="hidden sm:inline">เลื่อนขวา</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Reset Zoom */}
+          <button
+            onClick={handleResetZoom}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 ${
+              isZoomed
+                ? 'bg-brand/15 text-brand border border-brand/40 shadow-orange-glow'
+                : 'bg-white dark:bg-[#20202F] border border-slate-200 dark:border-[#2E2E42] text-slate-500 hover:text-slate-800 dark:hover:text-white'
+            }`}
+            title="รีเซ็ตขนาดกราฟกลับค่าเริ่มต้น"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>รีเซ็ต</span>
+          </button>
+        </div>
+
+        {/* User Guide Pill */}
+        <div className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden md:flex items-center gap-1">
+          <span>💡 เลื่อนล้อเมาส์ (Scroll) หรือบีบหน้าจอเพื่อซูม • ลากเมาส์ซ้าย-ขวาเพื่อเลื่อนดูช่วงเวลา</span>
+        </div>
+      </div>
+
       {/* Chart Canvas Area */}
-      <div className="h-72 sm:h-80 w-full relative">
+      <div className="h-72 sm:h-80 w-full relative cursor-grab active:cursor-grabbing select-none">
         {activeTab === 'angle' ? (
           <>
-            <Line data={angleChartData} options={angleOptions} />
-            <div className="absolute top-2 right-2 bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-[10px] text-emerald-300 font-semibold pointer-events-none">
+            <Line ref={chartRef} data={angleChartData} options={angleOptions} />
+            <div className="absolute top-2 right-2 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-[10px] text-emerald-300 font-semibold pointer-events-none shadow-sm backdrop-blur-xs">
               Safe Zone แนะนำ: 15° - 25°
             </div>
           </>
         ) : (
-          <Line data={impactChartData} options={impactOptions} />
+          <Line ref={chartRef} data={impactChartData} options={impactOptions} />
         )}
       </div>
 
       {/* Footer Notes */}
-      <div className="mt-4 pt-3 border-t border-slate-100 dark:border-[#1F1F2C] flex items-center justify-between text-xs text-slate-500 dark:text-dark-muted flex-wrap gap-2">
+      <div className="pt-2 border-t border-slate-100 dark:border-[#1F1F2C] flex items-center justify-between text-xs text-slate-500 dark:text-dark-muted flex-wrap gap-2">
         <span className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-brand"></span>
-          นับก้าวและวัดแรงกระแทกด้วยอัลกอริทึม Shock Detection บน ESP32-C3 SuperMini
+          <span>นับก้าวและวัดแรงกระแทกด้วยอัลกอริทึม Shock Detection บน ESP32-C3 SuperMini</span>
         </span>
         <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
           ความถี่การสุ่มตัวอย่าง: 50 Hz (Impact Sampling)
