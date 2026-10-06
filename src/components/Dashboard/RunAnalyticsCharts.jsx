@@ -21,7 +21,9 @@ import {
   RotateCcw, 
   ChevronLeft, 
   ChevronRight,
-  MoveHorizontal
+  ChevronUp,
+  ChevronDown,
+  Move
 } from 'lucide-react';
 
 // Register ChartJS modules including zoom plugin
@@ -42,7 +44,7 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
   const chartRef = useRef(null);
   const [isZoomed, setIsZoomed] = useState(false);
 
-  // Zoom and Pan Handlers
+  // Zoom and Pan Handlers (Full 2D: X and Y)
   const handleZoomIn = () => {
     if (chartRef.current) {
       chartRef.current.zoom(1.3);
@@ -67,6 +69,20 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
   const handlePanRight = () => {
     if (chartRef.current) {
       chartRef.current.pan({ x: -60 }, undefined, 'default');
+      setIsZoomed(true);
+    }
+  };
+
+  const handlePanUp = () => {
+    if (chartRef.current) {
+      chartRef.current.pan({ y: 35 }, undefined, 'default');
+      setIsZoomed(true);
+    }
+  };
+
+  const handlePanDown = () => {
+    if (chartRef.current) {
+      chartRef.current.pan({ y: -35 }, undefined, 'default');
       setIsZoomed(true);
     }
   };
@@ -99,11 +115,11 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
   const impactData = telemetry.map(t => t.accelerationZ || t.impactG || 1.2);
   const cadenceData = telemetry.map(t => t.cadence);
 
-  // Common Zoom Options Configuration
+  // Common Zoom & Pan Plugin Configuration supporting both X and Y axes
   const commonZoomPluginConfig = {
     pan: {
       enabled: true,
-      mode: 'x',
+      mode: 'xy', // Allows panning both horizontally and vertically
       modifierKey: null,
       onPanComplete: () => setIsZoomed(true)
     },
@@ -115,7 +131,7 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
       pinch: {
         enabled: true
       },
-      mode: 'x',
+      mode: 'xy', // Allows zooming both horizontally and vertically
       onZoomComplete: () => setIsZoomed(true)
     }
   };
@@ -186,8 +202,9 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         }
       },
       y: {
-        min: 10,
-        max: 35,
+        // Starts at 0 so lower angles (e.g. 5° - 10°) are clearly visible without being cut off
+        min: 0,
+        suggestedMax: 40,
         grid: {
           color: 'rgba(255, 255, 255, 0.06)'
         },
@@ -264,8 +281,8 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         type: 'linear',
         display: true,
         position: 'left',
-        min: 0.8,
-        max: 3.5,
+        min: 0.0,
+        suggestedMax: 3.5,
         grid: { color: 'rgba(255, 255, 255, 0.06)' },
         ticks: {
           color: '#A855F7',
@@ -278,7 +295,7 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         display: true,
         position: 'right',
         min: 0,
-        max: 220,
+        suggestedMax: 220,
         grid: { drawOnChartArea: false },
         ticks: {
           color: '#F59E0B',
@@ -338,11 +355,11 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
         </div>
       </div>
 
-      {/* Interactive Zoom & Pan Toolbar */}
+      {/* Interactive Zoom & Pan Toolbar (Supports Pan Up, Down, Left, Right, Zoom In, Zoom Out) */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#161622] border border-slate-200 dark:border-[#262638]">
-        <div className="flex items-center gap-1 sm:gap-1.5">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
           <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1 mr-1">
-            <MoveHorizontal className="w-3.5 h-3.5 text-brand" />
+            <Move className="w-3.5 h-3.5 text-brand" />
             <span>ซูม & เลื่อน:</span>
           </span>
 
@@ -366,25 +383,45 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
             <span className="hidden sm:inline">ซูมออก</span>
           </button>
 
-          {/* Pan Left */}
-          <button
-            onClick={handlePanLeft}
-            className="p-1.5 sm:px-2 sm:py-1 rounded-lg bg-white dark:bg-[#20202F] border border-slate-200 dark:border-[#2E2E42] text-slate-700 dark:text-slate-200 hover:text-brand hover:border-brand/50 text-xs font-semibold transition-all flex items-center gap-1 shadow-xs"
-            title="เลื่อนดูกราฟไปทางซ้าย (Pan Left)"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">เลื่อนซ้าย</span>
-          </button>
+          {/* Vertical Pan Controls (Up / Down) */}
+          <div className="flex items-center rounded-lg border border-slate-200 dark:border-[#2E2E42] bg-white dark:bg-[#20202F] overflow-hidden">
+            <button
+              onClick={handlePanUp}
+              className="p-1.5 sm:px-2 sm:py-1 text-slate-700 dark:text-slate-200 hover:text-brand hover:bg-slate-100 dark:hover:bg-[#2A2A3E] text-xs font-semibold transition-all flex items-center gap-1 border-r border-slate-200 dark:border-[#2E2E42]"
+              title="เลื่อนดูกราฟขึ้นด้านบน (Pan Up)"
+            >
+              <ChevronUp className="w-3.5 h-3.5 text-brand" />
+              <span className="hidden sm:inline">เลื่อนขึ้น</span>
+            </button>
+            <button
+              onClick={handlePanDown}
+              className="p-1.5 sm:px-2 sm:py-1 text-slate-700 dark:text-slate-200 hover:text-brand hover:bg-slate-100 dark:hover:bg-[#2A2A3E] text-xs font-semibold transition-all flex items-center gap-1"
+              title="เลื่อนดูกราฟลงด้านล่าง (Pan Down)"
+            >
+              <ChevronDown className="w-3.5 h-3.5 text-brand" />
+              <span className="hidden sm:inline">เลื่อนลง</span>
+            </button>
+          </div>
 
-          {/* Pan Right */}
-          <button
-            onClick={handlePanRight}
-            className="p-1.5 sm:px-2 sm:py-1 rounded-lg bg-white dark:bg-[#20202F] border border-slate-200 dark:border-[#2E2E42] text-slate-700 dark:text-slate-200 hover:text-brand hover:border-brand/50 text-xs font-semibold transition-all flex items-center gap-1 shadow-xs"
-            title="เลื่อนดูกราฟไปทางขวา (Pan Right)"
-          >
-            <span className="hidden sm:inline">เลื่อนขวา</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
+          {/* Horizontal Pan Controls (Left / Right) */}
+          <div className="flex items-center rounded-lg border border-slate-200 dark:border-[#2E2E42] bg-white dark:bg-[#20202F] overflow-hidden">
+            <button
+              onClick={handlePanLeft}
+              className="p-1.5 sm:px-2 sm:py-1 text-slate-700 dark:text-slate-200 hover:text-brand hover:bg-slate-100 dark:hover:bg-[#2A2A3E] text-xs font-semibold transition-all flex items-center gap-1 border-r border-slate-200 dark:border-[#2E2E42]"
+              title="เลื่อนดูกราฟไปทางซ้าย (Pan Left)"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">เลื่อนซ้าย</span>
+            </button>
+            <button
+              onClick={handlePanRight}
+              className="p-1.5 sm:px-2 sm:py-1 text-slate-700 dark:text-slate-200 hover:text-brand hover:bg-slate-100 dark:hover:bg-[#2A2A3E] text-xs font-semibold transition-all flex items-center gap-1"
+              title="เลื่อนดูกราฟไปทางขวา (Pan Right)"
+            >
+              <span className="hidden sm:inline">เลื่อนขวา</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           {/* Reset Zoom */}
           <button
@@ -403,7 +440,7 @@ export const RunAnalyticsCharts = ({ telemetry = [] }) => {
 
         {/* User Guide Pill */}
         <div className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden md:flex items-center gap-1">
-          <span>💡 เลื่อนล้อเมาส์ (Scroll) หรือบีบหน้าจอเพื่อซูม • ลากเมาส์ซ้าย-ขวาเพื่อเลื่อนดูช่วงเวลา</span>
+          <span>💡 ลากเมาส์เลื่อนได้อิสระทั้ง 4 ทิศทาง (ขึ้น-ลง / ซ้าย-ขวา) • เลื่อนล้อเมาส์เพื่อซูม</span>
         </div>
       </div>
 
