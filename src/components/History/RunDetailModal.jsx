@@ -16,6 +16,7 @@ import {
   FileText
 } from 'lucide-react';
 import { analyzeFootAngle } from '../../utils/calculations';
+import { formatRunDateTime } from '../../utils/dateUtils';
 
 export const RunDetailModal = ({ 
   isOpen, 
@@ -63,7 +64,7 @@ export const RunDetailModal = ({
             </h2>
             <p className="text-xs text-dark-muted flex items-center gap-1.5 mt-1">
               <Calendar className="w-3.5 h-3.5 text-brand" />
-              <span>วันเวลาที่บันทึก: <strong className="text-slate-300">{run.dateFormatted}</strong></span>
+              <span>วันเวลาที่บันทึก: <strong className="text-slate-300">{formatRunDateTime(run)}</strong></span>
             </p>
           </div>
 

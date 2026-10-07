@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy:local": "npm run build && npx firebase-tools emulators:start --only hosting",
-    "firebase:serve": "npm run build && npx firebase-tools serve --only hosting"
+    "deploy:local": "npm run build && npx firebase-tools emulators:start --only hosting --project demo-footpod",
+    "firebase:serve": "npm run build && npx firebase-tools emulators:start --only hosting --project demo-footpod"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

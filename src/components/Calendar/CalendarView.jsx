@@ -16,7 +16,8 @@ import {
   Clock, 
   ArrowLeft,
   CalendarDays,
-  Sparkles
+  Sparkles,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   THAI_MONTHS_FULL, 
@@ -25,6 +26,7 @@ import {
   getRunDateKey, 
   formatThaiFullDate, 
   formatThaiDate,
+  formatRunDateTime,
   getCalendarGrid 
 } from '../../utils/dateUtils';
 import { speedToPace, analyzeFootAngle } from '../../utils/calculations';
@@ -100,6 +102,16 @@ export const CalendarView = ({
     setViewMode('selected_day');
   };
 
+  // ตรวจสอบว่ารอบปัจจุบันบนบอร์ดถูกบันทึกเข้าปฏิทินของวันนี้แล้วหรือไม่
+  const isToday = selectedDateKey === todayKey;
+  const isAlreadySaved = Boolean(
+    activeRun?.isSaved || 
+    runs.some(r => r.id === activeRun?.id || (r.dateKey === todayKey && r.steps === activeRun?.steps && r.steps > 0))
+  );
+
+  // มีรอบสดที่กำลังทำงานอยู่และยังไม่ได้ถูกบันทึก
+  const hasUnsavedLiveRun = isToday && activeRun && activeRun.steps > 0 && !isAlreadySaved;
+
   // Selected date statistics
   const selectedDayRuns = useMemo(() => {
     return runsByDateKey[selectedDateKey] || [];
@@ -110,11 +122,19 @@ export const CalendarView = ({
   }, [viewMode, selectedDayRuns, runs]);
 
   const dayStats = useMemo(() => {
-    const totalRuns = selectedDayRuns.length;
-    const totalDistKm = selectedDayRuns.reduce((sum, r) => sum + (r.distanceKm || 0), 0);
-    const totalSteps = selectedDayRuns.reduce((sum, r) => sum + (r.steps || 0), 0);
-    const totalCal = selectedDayRuns.reduce((sum, r) => sum + (r.caloriesBurned || 0), 0);
+    const liveSteps = hasUnsavedLiveRun ? (activeRun?.steps || 0) : 0;
+    const liveDist = hasUnsavedLiveRun ? (activeRun?.distanceKm || 0) : 0;
+    const liveCal = hasUnsavedLiveRun ? (activeRun?.caloriesBurned || 0) : 0;
+
+    const totalRuns = selectedDayRuns.length + (hasUnsavedLiveRun ? 1 : 0);
+    const totalDistKm = selectedDayRuns.reduce((sum, r) => sum + (r.distanceKm || 0), 0) + liveDist;
+    const totalSteps = selectedDayRuns.reduce((sum, r) => sum + (r.steps || 0), 0) + liveSteps;
+    const totalCal = selectedDayRuns.reduce((sum, r) => sum + (r.caloriesBurned || 0), 0) + liveCal;
+    
     const validSpeeds = selectedDayRuns.map(r => r.avgSpeedKmh).filter(s => typeof s === 'number' && s > 0);
+    if (hasUnsavedLiveRun && activeRun?.avgSpeedKmh > 0) {
+      validSpeeds.push(activeRun.avgSpeedKmh);
+    }
     const avgSpeed = validSpeeds.length > 0 
       ? validSpeeds.reduce((a, b) => a + b, 0) / validSpeeds.length 
       : 0;
@@ -125,9 +145,10 @@ export const CalendarView = ({
       totalSteps,
       totalCal,
       avgSpeed: Number(avgSpeed.toFixed(1)),
-      avgPace: speedToPace(avgSpeed)
+      avgPace: speedToPace(avgSpeed),
+      hasUnsavedLiveRun
     };
-  }, [selectedDayRuns]);
+  }, [selectedDayRuns, hasUnsavedLiveRun, activeRun]);
 
   // Handle saving the current live session into the selected date
   const handleSaveToSelectedDate = () => {
@@ -232,7 +253,8 @@ export const CalendarView = ({
           <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
             {calendarDays.map((cell, index) => {
               const runsOnCell = runsByDateKey[cell.dateKey] || [];
-              const hasRuns = runsOnCell.length > 0;
+              const cellRunCount = runsOnCell.length + (cell.dateKey === todayKey && hasUnsavedLiveRun ? 1 : 0);
+              const hasRuns = cellRunCount > 0;
               const isSelected = cell.dateKey === selectedDateKey;
               const isTodayCell = cell.isToday;
 
@@ -275,7 +297,7 @@ export const CalendarView = ({
                           : 'bg-brand/15 dark:bg-brand/20 text-brand border border-brand/30'
                       }`}>
                         <Footprints className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                        <span>{runsOnCell.length}</span>
+                        <span>{cellRunCount}</span>
                       </div>
                     </div>
                   ) : (
@@ -389,30 +411,55 @@ export const CalendarView = ({
 
             </div>
 
-            {/* Save Current Session to this Date Action Card */}
-            <div className="p-3.5 rounded-xl bg-gradient-to-br from-brand/5 via-orange-500/10 to-amber-500/5 border border-brand/30 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                  <PlusCircle className="w-4 h-4 text-brand" />
-                  <span>บันทึกการวิ่งรอบปัจจุบันลงในวันนี้</span>
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-brand/20 text-brand font-semibold">
-                  {formatThaiDate(selectedDate)}
-                </span>
+            {/* Smart Sync & Save Status Card */}
+            {isAlreadySaved ? (
+              <div className="p-3.5 rounded-xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-emerald-500/5 border border-emerald-500/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <span>ข้อมูลการวิ่งของวันนี้บันทึกเข้าปฏิทินเรียบร้อยแล้ว (อัตโนมัติ)</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-semibold">
+                    {formatThaiDate(selectedDate)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                  ระบบได้รวบรวมข้อมูลการวิ่งทั้งหมด {selectedDayRuns.length} รอบ ({dayStats.totalSteps.toLocaleString()} ก้าว • {dayStats.totalDistKm} กม.) บันทึกและแสดงผลในสรุปสถิติประจำวันให้อัตโนมัติแล้ว
+                </p>
               </div>
+            ) : hasUnsavedLiveRun ? (
+              <div className="p-3.5 rounded-xl bg-gradient-to-br from-brand/5 via-orange-500/10 to-amber-500/5 border border-brand/30 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-brand animate-pulse" />
+                    <span>ดึงข้อมูลรอบสดเข้าสรุปปฏิทินของวันนี้อัตโนมัติ</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-brand/20 text-brand font-semibold">
+                    {formatThaiDate(selectedDate)}
+                  </span>
+                </div>
 
-              <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                ข้อมูลรอบสดจากบอร์ด: <strong className="text-brand font-mono">{activeRun?.steps || 0}</strong> ก้าว • <strong className="text-slate-900 dark:text-white font-mono">{activeRun?.distanceKm || 0}</strong> กม. • ความเร็ว <strong className="text-amber-500 font-mono">{activeRun?.avgSpeedKmh || 0}</strong> km/h
-              </p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                  ข้อมูลรอบสดจากบอร์ด: <strong className="text-brand font-mono">{activeRun?.steps || 0}</strong> ก้าว • <strong className="text-slate-900 dark:text-white font-mono">{activeRun?.distanceKm || 0}</strong> กม. • ความเร็ว <strong className="text-amber-500 font-mono">{activeRun?.avgSpeedKmh || 0}</strong> km/h (ระบบคำนวณรวมในสรุปด้านบนให้อัตโนมัติแล้ว)
+                </p>
 
-              <button
-                onClick={handleSaveToSelectedDate}
-                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2 transition-all"
-              >
-                <Check className="w-4 h-4" />
-                <span>บันทึกผลการวิ่งลงในวันที่ {formatThaiDate(selectedDate)}</span>
-              </button>
-            </div>
+                <button
+                  onClick={handleSaveToSelectedDate}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2 transition-all"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>บันทึกผลการวิ่งลงในวันที่ {formatThaiDate(selectedDate)}</span>
+                </button>
+              </div>
+            ) : isToday ? (
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#161622] border border-slate-200 dark:border-[#262638] flex items-center justify-between text-xs text-slate-500 dark:text-dark-muted">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <span>ปฏิทินซิงค์ข้อมูลกับแดชบอร์ดอัตโนมัติแล้ว ({selectedDayRuns.length} รอบ)</span>
+                </div>
+                <span className="font-mono text-[11px] text-brand font-bold">{dayStats.totalSteps.toLocaleString()} ก้าว</span>
+              </div>
+            ) : null}
 
           </div>
 
@@ -480,7 +527,7 @@ export const CalendarView = ({
                         </div>
                         <p className="text-[11px] text-slate-500 dark:text-dark-muted flex items-center gap-1.5 mt-0.5">
                           <CalendarIcon className="w-3 h-3 text-brand" />
-                          <span>{run.dateFormatted}</span>
+                          <span>{formatRunDateTime(run)}</span>
                         </p>
                       </div>
 

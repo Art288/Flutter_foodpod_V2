@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Edit3, X, Save, Navigation, Gauge, Activity, Flame, Clock, FileText, Check, Calendar } from 'lucide-react';
 import { calculateCalories, speedToPace, analyzeFootAngle } from '../../utils/calculations';
-import { getRunDateKey, toDateKey } from '../../utils/dateUtils';
+import { getRunDateKey, toDateKey, formatRunDateTime } from '../../utils/dateUtils';
 
 export const EditRunModal = ({ isOpen, onClose, run, onSave, userWeight = 65 }) => {
   const [formData, setFormData] = useState({
@@ -134,7 +134,7 @@ export const EditRunModal = ({ isOpen, onClose, run, onSave, userWeight = 65 }) 
           </div>
           <div>
             <h3 className="text-lg font-bold text-white">แก้ไขข้อมูลรอบวิ่ง (Edit Run Session)</h3>
-            <p className="text-xs text-dark-muted">บันทึกเมื่อ: {run.dateFormatted}</p>
+            <p className="text-xs text-dark-muted">บันทึกเมื่อ: {formatRunDateTime(run)}</p>
           </div>
         </div>
 

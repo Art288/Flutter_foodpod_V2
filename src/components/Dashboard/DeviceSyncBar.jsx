@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Bluetooth, 
   BluetoothOff, 
@@ -9,7 +9,8 @@ import {
   Zap, 
   HardDrive, 
   Unplug,
-  AlertCircle
+  AlertCircle,
+  RotateCcw
 } from 'lucide-react';
 import { bleService } from '../../services/bleService';
 
@@ -23,6 +24,7 @@ export const DeviceSyncBar = ({
   onBleTelemetry,
   onSyncSDCardData,
   onSaveCurrentSession,
+  onResetFootAngle,
   isLiveStreamActive = false,
   isSyncing, 
   lastSyncTime,
@@ -32,6 +34,13 @@ export const DeviceSyncBar = ({
   const [noticeMsg, setNoticeMsg] = useState('');
   const [noticeType, setNoticeType] = useState('success'); // 'success' | 'error'
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // Sync onBleTelemetry callback reference whenever App updates
+  useEffect(() => {
+    if (onBleTelemetry) {
+      bleService.onDataCallback = onBleTelemetry;
+    }
+  }, [onBleTelemetry]);
 
   // Connect directly via Web Bluetooth API (No mockup!)
   const handleConnectBluetooth = async () => {
@@ -238,12 +247,31 @@ export const DeviceSyncBar = ({
               {onSaveCurrentSession && (
                 <button
                   type="button"
-                  onClick={onSaveCurrentSession}
+                  onClick={() => onSaveCurrentSession && onSaveCurrentSession()}
                   className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                   title="บันทึกข้อมูลก้าวและระยะทางจริงจากเซนเซอร์ในรอบวิ่งปัจจุบันลงในประวัติ"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>บันทึกรอบนี้</span>
+                </button>
+              )}
+
+              {/* Reset Foot Angle (Tare 0°) Button */}
+              {onResetFootAngle && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await onResetFootAngle();
+                    setNoticeType('success');
+                    setNoticeMsg('🎯 รีเซ็ตองศาเท้าเป็นศูนย์ (0.0°) สำเร็จ! เมื่อเริ่มขยับระบบจะนับองศาทันที');
+                    setShowNotice(true);
+                    setTimeout(() => setShowNotice(false), 4000);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer group"
+                  title="กดเพื่อเซ็ตระนาบเท้าปัจจุบันให้เป็น 0 องศา (Tare Angle) เมื่อขยับจะวัดองศาทันที"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-white group-hover:-rotate-90 transition-transform duration-300" />
+                  <span>รีเซ็ตองศา (0°)</span>
                 </button>
               )}
 

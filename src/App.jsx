@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { Navbar } from './components/Navbar';
@@ -14,6 +14,7 @@ import { RunAnalyticsCharts } from './components/Dashboard/RunAnalyticsCharts';
 import { GoalSettingModal } from './components/Goals/GoalSettingModal';
 import { GoalProgressCard } from './components/Goals/GoalProgressCard';
 import { HealthBMICard } from './components/Dashboard/HealthBMICard';
+import { bleService } from './services/bleService';
 import { RunHistoryList } from './components/History/RunHistoryList';
 import { EditRunModal } from './components/History/EditRunModal';
 import { RunDetailModal } from './components/History/RunDetailModal';
@@ -42,17 +43,83 @@ const MainAppFlow = () => {
   const [deviceConnected, setDeviceConnected] = useState(false);
   const [connectedDevice, setConnectedDevice] = useState(null);
 
+  // Sanitize and repair any run that might have broken dates (e.g. NaN undefined NaN)
+  const sanitizeRun = (r) => {
+    if (!r) return r;
+    const thaiMonths = [
+      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+    ];
+
+    const isBroken = !r.dateKey || 
+      r.dateKey.includes('NaN') || 
+      !r.dateFormatted || 
+      r.dateFormatted.includes('NaN') || 
+      r.dateFormatted.includes('undefined') || 
+      !r.timestamp || 
+      isNaN(r.timestamp);
+
+    if (!isBroken) return r;
+
+    // Determine fallback date (default today)
+    const now = new Date();
+    let d = now;
+    if (typeof r.timestamp === 'number' && !isNaN(r.timestamp) && r.timestamp > 0) {
+      d = new Date(r.timestamp);
+    }
+
+    let timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} น.`;
+    if (r.dateFormatted && typeof r.dateFormatted === 'string') {
+      const match = r.dateFormatted.match(/(\d{1,2}:\d{2}\s*น\.)/);
+      if (match) timeStr = match[1];
+    }
+
+    const dDay = !isNaN(d.getDate()) ? d.getDate() : now.getDate();
+    const dMonth = !isNaN(d.getMonth()) ? d.getMonth() : now.getMonth();
+    const dYear = !isNaN(d.getFullYear()) ? d.getFullYear() : now.getFullYear();
+    const mName = thaiMonths[dMonth] || 'ต.ค.';
+
+    const validKey = toDateKey(d) || toDateKey(now);
+    const validFormatted = `${dDay} ${mName} ${dYear + 543}, ${timeStr}`;
+
+    return {
+      ...r,
+      timestamp: !isNaN(d.getTime()) ? d.getTime() : now.getTime(),
+      dateKey: validKey,
+      dateFormatted: validFormatted
+    };
+  };
+
   // Filter to ensure only real hardware runs (from ESP32 BLE / SD Card) are loaded
   const filterRealRuns = (list) => {
     if (!Array.isArray(list)) return [];
-    return list.filter(r => 
-      r && r.id && 
-      !r.id.includes('sample') && 
-      !r.id.includes('mock') && 
-      !r.id.includes('sd_card_run') &&
-      r.title !== 'การวิ่งตรวจวัดจากเซนเซอร์ FootPod (BNO055)'
-    );
+    return list
+      .filter(r => 
+        r && r.id && 
+        !r.id.includes('sample') && 
+        !r.id.includes('mock') && 
+        r.title !== 'การวิ่งตรวจวัดจากเซนเซอร์ FootPod (BNO055)'
+      )
+      .map(sanitizeRun);
   };
+
+  // Auto-repair all stored runs across localStorage upon initial app load
+  useEffect(() => {
+    try {
+      const allKeys = Object.keys(localStorage).filter(k => k.startsWith('footpod_runs_'));
+      allKeys.forEach(k => {
+        const raw = localStorage.getItem(k);
+        if (raw && (raw.includes('NaN') || raw.includes('undefined'))) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const repaired = parsed.map(sanitizeRun);
+            localStorage.setItem(k, JSON.stringify(repaired));
+            setRuns(repaired);
+          }
+        }
+      });
+    } catch (e) {}
+  }, []);
 
   // Runs state: Starts EMPTY ([]) by default so all metrics start at 0 until synced from physical board
   const [runs, setRuns] = useState(() => {
@@ -120,6 +187,31 @@ const MainAppFlow = () => {
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [selectedRunForDetail, setSelectedRunForDetail] = useState(null);
   const [selectedRunForEdit, setSelectedRunForEdit] = useState(null);
+  // Tare Baseline Refs สำหรับเซ็ตระนาบศูนย์ 0.0°
+  const tareBaselineRef = useRef(null);
+  const latestRawAngleRef = useRef(0.0);
+
+  // ฟังก์ชันรีเซ็ตองศาเท้าเป็นศูนย์ (Tare Angle to 0°)
+  const handleResetFootAngle = async () => {
+    // 1. นำค่า raw angle ณ เสี้ยววินาทีนี้มาเป็น baseline ทันที
+    const currentRaw = (latestRawAngleRef.current !== 0 
+      ? latestRawAngleRef.current 
+      : (activeRun.rawPitch || activeRun.avgFootAngle || 0.0));
+    tareBaselineRef.current = currentRaw;
+
+    // 2. ส่งคำสั่ง TARE_PITCH ไปยังบอร์ด ESP32 ผ่านบลูทูธ และกำหนด baseline ใน bleService
+    try {
+      await bleService.resetFootAngle(currentRaw);
+    } catch (e) {
+      console.warn('Failed to send resetFootAngle over BLE:', e);
+    }
+
+    // 3. ปรับค่าใน activeRun ให้เป็น 0.0° ทันทีแบบ real-time
+    setActiveRun(prev => ({
+      ...prev,
+      avgFootAngle: 0.0
+    }));
+  };
 
   // Goal handler
   const handleSaveGoal = (newGoal) => {
@@ -228,8 +320,20 @@ const MainAppFlow = () => {
       return;
     }
 
-    // Real hardware values extracted directly from BNO055 packets
-    const liveAngle = typeof data.pitch === 'number' ? Number(data.pitch.toFixed(1)) : 0.0;
+    // บันทึกค่าองศาดิบจากเซนเซอร์
+    const rawAngle = typeof data.rawPitch === 'number' 
+      ? data.rawPitch 
+      : (typeof data.pitch === 'number' ? data.pitch : 0.0);
+    latestRawAngleRef.current = rawAngle;
+
+    // คำนวณ Tare Offset 0°: หากกดรีเซ็ตไว้ จะหักลบ baseline เป็น 0.0° ทันที และนับตามการขยับจริง
+    let liveAngle = 0.0;
+    if (tareBaselineRef.current !== null) {
+      liveAngle = Number(Math.abs(rawAngle - tareBaselineRef.current).toFixed(1));
+    } else if (typeof data.pitch === 'number') {
+      liveAngle = Number(data.pitch.toFixed(1));
+    }
+
     const liveCadence = typeof data.cadence === 'number' ? Math.round(data.cadence) : 0;
     const liveSteps = typeof data.steps === 'number' ? data.steps : 0;
     const liveDist = typeof data.dist === 'number' 
@@ -265,6 +369,8 @@ const MainAppFlow = () => {
         updatedTelemetry = [...prevTelem.slice(-24), newPoint];
       }
 
+      const isNewSteps = liveSteps > (prev.lastSavedSteps || 0);
+
       return {
         ...prev,
         id: prev.id === 'zero_state_idle' ? 'ble_live_session' : prev.id,
@@ -275,9 +381,11 @@ const MainAppFlow = () => {
         impactG: liveImpactG,
         avgSpeedKmh: liveSpeed,
         avgFootAngle: liveAngle,
+        rawPitch: rawAngle,
         avgCadence: liveCadence,
         caloriesBurned: dynamicCalories,
         lastChartSec: nowSec,
+        isSaved: isNewSteps ? false : (prev.isSaved ?? false),
         strikeDistribution: {
           forefoot: 18,
           midfoot: 72,
@@ -310,9 +418,19 @@ const MainAppFlow = () => {
       return;
     }
 
-    const baseDate = targetDate 
-      ? (targetDate instanceof Date ? targetDate : new Date(targetDate)) 
-      : new Date();
+    // ป้องกันกรณี targetDate เป็น Event object หรือไม่ใช่ Date ที่ถูกต้อง
+    let baseDate = new Date();
+    if (targetDate instanceof Date && !isNaN(targetDate.getTime())) {
+      baseDate = targetDate;
+    } else if (typeof targetDate === 'string' || typeof targetDate === 'number') {
+      const parsed = new Date(targetDate);
+      if (!isNaN(parsed.getTime())) {
+        baseDate = parsed;
+      }
+    }
+    if (!baseDate || isNaN(baseDate.getTime())) {
+      baseDate = new Date();
+    }
     const dateKey = toDateKey(baseDate);
 
     const thaiMonths = [
@@ -321,7 +439,11 @@ const MainAppFlow = () => {
     ];
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} น.`;
-    const dateFormatted = `${baseDate.getDate()} ${thaiMonths[baseDate.getMonth()]} ${baseDate.getFullYear() + 543}, ${timeStr}`;
+    const dDay = !isNaN(baseDate.getDate()) ? baseDate.getDate() : now.getDate();
+    const dMonth = !isNaN(baseDate.getMonth()) ? baseDate.getMonth() : now.getMonth();
+    const dYear = !isNaN(baseDate.getFullYear()) ? baseDate.getFullYear() : now.getFullYear();
+    const mName = thaiMonths[dMonth] || 'ต.ค.';
+    const dateFormatted = `${dDay} ${mName} ${dYear + 543}, ${timeStr}`;
 
     const distMeters = Math.round((activeRun.distanceKm || 0) * 1000);
     const distKm = Number((activeRun.distanceKm || ((activeRun.steps * 1.25) / 1000)).toFixed(3));
@@ -349,11 +471,23 @@ const MainAppFlow = () => {
     const finalPace = speedToPace(overallAvgSpeed);
     const finalDurationMinutes = activeRun.durationMinutes || (durationSeconds > 0 ? Math.max(1, Math.round(durationSeconds / 60)) : Math.max(1, Math.round(activeRun.steps / (activeRun.avgCadence || 160))));
 
+    // ตรวจสอบว่ามีบันทึกรอบวิ่งที่มีจำนวนก้าวและระยะทางเดียวกันในวันนี้ไปแล้วหรือไม่ เพื่อป้องกันการบันทึกซ้ำ
+    const isDuplicate = runs.some(r => r.dateKey === dateKey && r.steps === activeRun.steps && r.distanceKm === distKm);
+    if (isDuplicate) {
+      alert(`รอบวิ่งจำนวน ${activeRun.steps.toLocaleString()} ก้าว ของวันที่ ${dDay} ${mName} ${dYear + 543} ถูกบันทึกไว้ในระบบเรียบร้อยแล้ว`);
+      setActiveRun(prev => ({
+        ...prev,
+        isSaved: true,
+        lastSavedSteps: activeRun.steps
+      }));
+      return;
+    }
+
     const savedLiveRun = {
       ...activeRun,
       id: 'real_live_run_' + Date.now(),
       dateKey: dateKey,
-      timestamp: baseDate.getTime(),
+      timestamp: !isNaN(baseDate.getTime()) ? baseDate.getTime() : now.getTime(),
       title: '🏃‍♂️ ข้อมูลจริงจากบอร์ด ESP32-C3 (Live Run)',
       dateFormatted: dateFormatted,
       isRealHardwareData: true,
@@ -361,15 +495,17 @@ const MainAppFlow = () => {
       avgSpeedKmh: overallAvgSpeed,
       avgPace: finalPace,
       durationMinutes: finalDurationMinutes,
+      isSaved: true,
+      lastSavedSteps: activeRun.steps,
       notes: `บันทึกข้อมูลสดจากเซนเซอร์: ${activeRun.steps.toLocaleString()} ก้าว • ระยะทาง ${distKm} กม. (${distMeters.toLocaleString()} ม.) • ความเร็วเฉลี่ย ${overallAvgSpeed} km/h (เพซ ${finalPace}/km) • แรงกระแทก ${activeRun.impactG || 1.0} G`
     };
 
     setRuns(prev => [savedLiveRun, ...prev.filter(r => 
-      !r.id.includes('mock') && !r.id.includes('sample') && !r.id.includes('sd_card_run')
+      !r.id.includes('mock') && !r.id.includes('sample')
     )]);
     setActiveRun(savedLiveRun);
     setLastSyncTime(dateFormatted);
-    alert(`✅ บันทึกรอบวิ่งลงในวันที่ ${baseDate.getDate()} ${thaiMonths[baseDate.getMonth()]} ${baseDate.getFullYear() + 543} เรียบร้อยแล้ว!\n- ความเร็วเฉลี่ย: ${overallAvgSpeed} km/h (เพซ ${finalPace}/km)\n- จำนวนก้าว: ${activeRun.steps.toLocaleString()} ก้าว\n- ระยะทาง: ${distKm} กม. (${distMeters.toLocaleString()} ม.)`);
+    alert(`✅ บันทึกรอบวิ่งลงในวันที่ ${dDay} ${mName} ${dYear + 543} เรียบร้อยแล้ว!\n- ความเร็วเฉลี่ย: ${overallAvgSpeed} km/h (เพซ ${finalPace}/km)\n- จำนวนก้าว: ${activeRun.steps.toLocaleString()} ก้าว\n- ระยะทาง: ${distKm} กม. (${distMeters.toLocaleString()} ม.)`);
   };
 
   // Clear all mock/previous runs
@@ -460,10 +596,12 @@ const MainAppFlow = () => {
               setDeviceConnected(false);
               setConnectedDevice(null);
               setIsLiveStreamActive(false);
+              tareBaselineRef.current = null;
             }}
             onBleTelemetry={handleBleTelemetry}
             onSyncSDCardData={handleSyncSDCardData}
-            onSaveCurrentSession={handleSaveCurrentSession}
+            onSaveCurrentSession={() => handleSaveCurrentSession()}
+            onResetFootAngle={handleResetFootAngle}
             isLiveStreamActive={isLiveStreamActive}
             isSyncing={isSyncing}
             lastSyncTime={lastSyncTime}
@@ -510,6 +648,8 @@ const MainAppFlow = () => {
             strikeDistribution={activeRun.strikeDistribution}
             maxAngle={activeRun.maxFootAngle}
             minAngle={activeRun.minFootAngle}
+            deviceConnected={deviceConnected}
+            onResetFootAngle={handleResetFootAngle}
             onOpenHealthData={() => setCurrentView('settings')}
           />
 

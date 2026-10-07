@@ -89,6 +89,7 @@ uint8_t bnoAddr = 0x28;
 uint8_t lastFoundAddr = 0;
 
 float gyroAngleX = 0, gyroAngleY = 0, gyroAngleZ = 0; // Roll, Pitch, Yaw
+float pitchBaselineOffset = 0.0f; // องศาอ้างอิงศูนย์สำหรับคำนวณการเคลื่อนไหว
 float bnoAx = 0, bnoAy = 0, bnoAz = 0;
 float currentG = 1.0f;
 float lastImpactG = 1.0f;
@@ -143,6 +144,10 @@ class MyRxCallbacks: public BLECharacteristicCallbacks {
       else if (rxValue.indexOf("USER_LOGOUT") >= 0 || rxValue.indexOf("STOP_TRACKING") >= 0) {
         isAuthorized = false;
         Serial.println("[AUTH] User logged out -> Tracking DISABLED & Board in Standby!");
+      }
+      else if (rxValue.indexOf("TARE_PITCH") >= 0 || rxValue.indexOf("RESET_ANGLE") >= 0) {
+        pitchBaselineOffset = gyroAngleY;
+        Serial.printf("[BLE RX] Tare Angle executed. New Pitch Baseline Offset: %.2f deg\n", pitchBaselineOffset);
       }
       else if (rxValue.indexOf("SYNC_SD") >= 0) {
         syncRequested = true;
@@ -551,8 +556,9 @@ void updateOLED() {
 
     u8g2.drawHLine(0, 9, 72);
 
-    // Row 1: Pitch (Flexion Angle)
-    int pInt = (int)round(gyroAngleY);
+    // Row 1: Pitch (Flexion Angle relative to tare baseline)
+    float relPitch = gyroAngleY - pitchBaselineOffset;
+    int pInt = (int)round(relPitch);
     char bufP[12];
     snprintf(bufP, sizeof(bufP), "Ang:%+2d\xb0", pInt);
     u8g2.drawStr(0, 18, bufP);
@@ -662,14 +668,15 @@ void loop() {
   // ส่งข้อมูลแบบ Real-time BLE Notification ทุกๆ 100ms (10Hz) เมื่อเชื่อมต่อและได้รับการยืนยันตัวตน (Login) แล้ว
   if (bleConnected && isAuthorized && (now - lastBleNotify >= 100)) {
     lastBleNotify = now;
-    float pitchAngle = fabs(gyroAngleY);
+    float relativePitch = gyroAngleY - pitchBaselineOffset;
+    float pitchAngle = fabs(relativePitch);
     float distKm = totalDistanceM / 1000.0f;
     float speedKmh = (currentCadence * METERS_PER_STEP * 60.0f) / 1000.0f;
 
     char bleBuf[160];
     snprintf(bleBuf, sizeof(bleBuf),
-      "{\"pitch\":%.1f,\"roll\":%.1f,\"yaw\":%.1f,\"steps\":%lu,\"dist\":%.3f,\"distM\":%.1f,\"speed\":%.1f,\"cadence\":%d,\"impactG\":%.2f,\"g\":%.2f}",
-      pitchAngle, gyroAngleX, gyroAngleZ, stepCount, distKm, totalDistanceM, speedKmh, currentCadence, lastImpactG, currentG
+      "{\"pitch\":%.1f,\"rawPitch\":%.1f,\"roll\":%.1f,\"yaw\":%.1f,\"steps\":%lu,\"dist\":%.3f,\"distM\":%.1f,\"speed\":%.1f,\"cadence\":%d,\"impactG\":%.2f,\"g\":%.2f}",
+      pitchAngle, gyroAngleY, gyroAngleX, gyroAngleZ, stepCount, distKm, totalDistanceM, speedKmh, currentCadence, lastImpactG, currentG
     );
 
     pTxCharacteristic->setValue((uint8_t*)bleBuf, strlen(bleBuf));

@@ -18,7 +18,7 @@ export const StatCardGrid = ({
   const angleAnalysis = isZero 
     ? {
         type: 'รอข้อมูล',
-        safetyZone: 'รอซิงค์',
+        safetyZone: avgFootAngle === 0 ? 'ระนาบ 0°' : 'รอซิงค์',
         color: '#8E8EA0',
         bgColor: 'bg-slate-500/10',
         textColor: 'text-slate-500 dark:text-slate-400',

@@ -15,6 +15,7 @@ import {
   Zap
 } from 'lucide-react';
 import { analyzeFootAngle } from '../../utils/calculations';
+import { formatRunDateTime } from '../../utils/dateUtils';
 
 export const RunHistoryList = ({ 
   runs = [], 
@@ -214,7 +215,7 @@ export const RunHistoryList = ({
                     {/* Recorded Date/Time */}
                     <p className="text-xs text-slate-600 dark:text-dark-muted flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-brand" />
-                      <span>วันเวลาที่บันทึกข้อมูล: <strong className="text-slate-800 dark:text-slate-300 font-medium">{run.dateFormatted}</strong></span>
+                      <span>วันเวลาที่บันทึกข้อมูล: <strong className="text-slate-800 dark:text-slate-300 font-medium">{formatRunDateTime(run)}</strong></span>
                     </p>
                   </div>
 

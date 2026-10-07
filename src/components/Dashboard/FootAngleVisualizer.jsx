@@ -1,23 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { analyzeFootAngle } from '../../utils/calculations';
-import { Footprints, ChevronRight } from 'lucide-react';
+import { Footprints, ChevronRight, RotateCcw, Check } from 'lucide-react';
 
 export const FootAngleVisualizer = ({ 
   currentAngle = 0.0, 
   strikeDistribution = { forefoot: 0, midfoot: 0, heel: 0 },
   maxAngle = 0.0,
   minAngle = 0.0,
+  deviceConnected = false,
+  onResetFootAngle,
   onOpenHealthData
 }) => {
+  const [isResetting, setIsResetting] = useState(false);
+  const [justReset, setJustReset] = useState(false);
   const isZero = currentAngle === 0;
   const analysis = isZero
-    ? {
+    ? (deviceConnected ? {
+        type: 'Tare 0°',
+        label: 'ระนาบศูนย์ (0.0°)',
+        safetyZone: 'พร้อมวัดองศา',
+        bgColor: 'bg-indigo-500/10',
+        textColor: 'text-indigo-500 dark:text-indigo-400',
+        borderColor: 'border-indigo-500/30'
+      } : {
         label: 'รอข้อมูลเซนเซอร์',
         safetyZone: 'รอการซิงค์',
         bgColor: 'bg-slate-500/10',
         textColor: 'text-slate-500 dark:text-slate-400',
         borderColor: 'border-slate-500/30'
-      }
+      })
     : analyzeFootAngle(currentAngle);
 
   // Calculate shoe rotation angle for the SVG graphic (visual pitch)
@@ -34,6 +45,38 @@ export const FootAngleVisualizer = ({
         </h3>
 
         <div className="flex items-center gap-2">
+          {onResetFootAngle && deviceConnected && (
+            <button
+              type="button"
+              onClick={async () => {
+                setIsResetting(true);
+                await onResetFootAngle();
+                setIsResetting(false);
+                setJustReset(true);
+                setTimeout(() => setJustReset(false), 2500);
+              }}
+              disabled={isResetting}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border shadow-sm ${
+                justReset 
+                  ? 'bg-emerald-600 text-white border-emerald-500' 
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500/50'
+              }`}
+              title="รีเซ็ตระนาบเท้าปัจจุบันให้เป็น 0.0° (Tare Angle) ทันที เมื่อขยับจะเริ่มนับองศาทันที"
+            >
+              {justReset ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-white" />
+                  <span>เซ็ต 0° แล้ว</span>
+                </>
+              ) : (
+                <>
+                  <RotateCcw className={`w-3.5 h-3.5 text-white ${isResetting ? 'animate-spin' : ''}`} />
+                  <span>เซ็ต 0° (รีเซ็ต)</span>
+                </>
+              )}
+            </button>
+          )}
+
           <span className={`px-2.5 py-0.5 rounded-lg text-xs font-semibold border ${analysis.bgColor} ${analysis.textColor} ${analysis.borderColor}`}>
             {analysis.label}
           </span>

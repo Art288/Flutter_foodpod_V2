@@ -62,7 +62,8 @@ export function getRunDateKey(run) {
       }
     }
   }
-  return '';
+  // Fallback to today if run has missing/broken date key so it won't disappear from calendar
+  return toDateKey(new Date());
 }
 
 /**
@@ -88,6 +89,52 @@ export function formatThaiDate(date) {
   const month = THAI_MONTHS_SHORT[d.getMonth()];
   const year = d.getFullYear() + 543;
   return `${day} ${month} ${year}`;
+}
+
+/**
+ * Format a run record's date and time safely into Thai string (e.g. "7 ต.ค. 2569, 22:25 น.")
+ * Guaranteed to never output "NaN" or "undefined", even with corrupted legacy data.
+ */
+export function formatRunDateTime(run) {
+  if (!run) return '';
+  const thaiMonths = [
+    'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+  ];
+
+  // If dateFormatted is completely clean and valid
+  if (
+    run.dateFormatted && 
+    typeof run.dateFormatted === 'string' && 
+    !run.dateFormatted.includes('NaN') && 
+    !run.dateFormatted.includes('undefined')
+  ) {
+    return run.dateFormatted;
+  }
+
+  // Extract time string if available (e.g. "22:25 น.")
+  const now = new Date();
+  let timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} น.`;
+  if (run.dateFormatted && typeof run.dateFormatted === 'string') {
+    const match = run.dateFormatted.match(/(\d{1,2}:\d{2}\s*น\.)/);
+    if (match) timeStr = match[1];
+  }
+
+  // Fallback to timestamp, valid dateKey, or current time
+  let d = now;
+  if (typeof run.timestamp === 'number' && !isNaN(run.timestamp) && run.timestamp > 0) {
+    d = new Date(run.timestamp);
+  } else if (run.dateKey && /^\d{4}-\d{2}-\d{2}$/.test(run.dateKey) && !run.dateKey.includes('NaN')) {
+    const [y, m, day] = run.dateKey.split('-').map(Number);
+    d = new Date(y, m - 1, day);
+  }
+
+  const dDay = !isNaN(d.getDate()) ? d.getDate() : now.getDate();
+  const dMonth = !isNaN(d.getMonth()) ? d.getMonth() : now.getMonth();
+  const dYear = !isNaN(d.getFullYear()) ? d.getFullYear() : now.getFullYear();
+  const mName = thaiMonths[dMonth] || 'ต.ค.';
+
+  return `${dDay} ${mName} ${dYear + 543}, ${timeStr}`;
 }
 
 /**

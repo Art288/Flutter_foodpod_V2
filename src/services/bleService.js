@@ -20,6 +20,8 @@ class BleService {
     this.isConnected = false;
     this.onDataCallback = null;
     this.onDisconnectCallback = null;
+    this.angleBaseline = null; // จุดอ้างอิงศูนย์สำหรับรีเซ็ตองศาเท้า (Tare Angle)
+    this.lastRawPitch = null;
   }
 
   isSupported() {
@@ -80,6 +82,22 @@ class BleService {
       const text = decoder.decode(event.target.value);
       try {
         const data = JSON.parse(text);
+
+        // บันทึกค่าองศาดิบ rawPitch จากเซนเซอร์
+        const rawPitch = typeof data.rawPitch === 'number' 
+          ? data.rawPitch 
+          : (typeof data.pitch === 'number' ? data.pitch : 0.0);
+        this.lastRawPitch = rawPitch;
+        data.rawPitch = rawPitch;
+
+        // คำนวณองศาเทียบกับจุด Tare 0° ทันทีเมื่อผู้ใช้กดรีเซ็ต
+        if (this.angleBaseline !== null) {
+          const delta = Math.abs(rawPitch - this.angleBaseline);
+          data.pitch = Number(delta.toFixed(1));
+        } else if (typeof data.pitch === 'number') {
+          data.pitch = Number(data.pitch.toFixed(1));
+        }
+
         if (this.onDataCallback) {
           this.onDataCallback(data);
         }
@@ -125,6 +143,16 @@ class BleService {
     return await this.sendCommand('SYNC_SD');
   }
 
+  // ส่งคำสั่งรีเซ็ตองศาเท้า (Tare Angle 0°) ไปยังบอร์ด ESP32 และเซ็ต Baseline ในตัว Service
+  async resetFootAngle(currentAngleFallback = 0.0) {
+    // 1. นำค่า raw pitch ปัจจุบันมาเป็น baseline ทันที (หรือใช้ fallback หากยังไม่มีแพ็กเก็ตใหม่)
+    this.angleBaseline = (this.lastRawPitch !== null && typeof this.lastRawPitch === 'number')
+      ? this.lastRawPitch
+      : (typeof currentAngleFallback === 'number' ? currentAngleFallback : 0.0);
+    // 2. ส่งคำสั่งไปยัง ESP32
+    return await this.sendCommand('TARE_PITCH');
+  }
+
   // ส่งคำสั่งปลดล็อกให้บอร์ดเริ่มนับค่า (เมื่อ Login ใหม่และเชื่อมต่อ)
   async notifyLogin() {
     return await this.sendCommand('USER_LOGIN');
@@ -146,6 +174,8 @@ class BleService {
   }
 
   disconnect() {
+    this.angleBaseline = null;
+    this.lastRawPitch = null;
     if (this.characteristic) {
       try {
         this.characteristic.stopNotifications();
